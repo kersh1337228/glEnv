@@ -14,13 +14,6 @@
 //
 #include "linalg.hpp"
 
-static const aiTextureType tts[4] = {
-    aiTextureType_DIFFUSE,
-    aiTextureType_SPECULAR,
-    aiTextureType_HEIGHT,
-    aiTextureType_AMBIENT
-};
-
 struct Vertex {
     vec3 pos, norm, tg, bitg;
     vec2 texCoord;
@@ -35,12 +28,18 @@ class Material {
 private:
     std::vector<Texture> textures;
     static std::unordered_map<std::string, Texture> textures_loaded;
+    static constexpr aiTextureType tts[4] = {
+        aiTextureType_DIFFUSE,
+        aiTextureType_SPECULAR,
+        aiTextureType_HEIGHT,
+        aiTextureType_AMBIENT
+    };
 public:
     explicit Material(const aiMaterial* const material, const std::string& dir) {
         aiString str; std::string path;
         std::unordered_map<std::string, Texture>::const_iterator used;
         Texture texture{};
-        for (const aiTextureType& tt : tts) {
+        for (const aiTextureType& tt : tts)
             for(unsigned int i = 0; i < material->GetTextureCount(tt); i++) {
                 material->GetTexture(tt, i, &str);
                 path = std::string(str.C_Str());
@@ -53,7 +52,6 @@ public:
                     textures_loaded.emplace(path, texture);
                 }
             }
-        }
     }
 
     static unsigned int load_texture(const std::string& path) {
@@ -112,7 +110,6 @@ public:
 std::unordered_map<std::string, Texture> Material::textures_loaded = {};
 
 class Mesh {
-    friend class Model;
 private:
     GLsizei count;
     Material material;
@@ -136,7 +133,7 @@ public:
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, vebo[1]);
         glBufferData(
             GL_ELEMENT_ARRAY_BUFFER,
-            static_cast<GLsizeiptr>(indices.size() * sizeof(unsigned int)),
+            static_cast<GLsizeiptr>(count * sizeof(unsigned int)),
             &indices[0], GL_STATIC_DRAW
         );
         glEnableVertexAttribArray(0);
@@ -169,10 +166,12 @@ public:
     void draw(const Shader& shader) const noexcept {
         material.bind(shader);
         glBindVertexArray(vao);
-        glDrawElements(
-            GL_TRIANGLES, count,
-            GL_UNSIGNED_INT, nullptr
-        );
+        glDrawElements(GL_TRIANGLES, count, GL_UNSIGNED_INT, nullptr);
+    }
+
+    inline void clear() const noexcept {
+        glDeleteVertexArrays(1, &vao);
+        glDeleteBuffers(2, vebo);
     }
 };
 
@@ -215,7 +214,7 @@ struct Transform {
         );
     }
 
-    [[nodiscard]] mat4 model() const noexcept {
+    [[nodiscard]] inline mat4 model() const noexcept {
         return {
             {
                 scaling.x() * (1 - 2 * (rotation.v.y() * rotation.v.y() + rotation.v.z() * rotation.v.z())),
@@ -252,38 +251,22 @@ public:
         if(!scene || scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE || !scene->mRootNode)
             throw std::ios::failure(std::string("ERROR::ASSIMP::").append(importer.GetErrorString()));
         const std::string dir = path.substr(0, path.find_last_of('/'));
-        std::for_each_n(scene->mMeshes, scene->mNumMeshes, [&scene, &dir, this](aiMesh *mesh) noexcept {
+        for (aiMesh **mesh = scene->mMeshes, **eom = scene->mMeshes + scene->mNumMeshes; mesh != eom; ++mesh) {
             std::vector<Vertex> vertices;
-            for (unsigned int i = 0; i < mesh->mNumVertices; ++i) {
-                vertices.emplace_back(vec3(
-                    static_cast<float>(mesh->mVertices[i].x),
-                    static_cast<float>(mesh->mVertices[i].y),
-                    static_cast<float>(mesh->mVertices[i].z)
-                ), mesh->HasNormals() ? vec3(
-                    static_cast<float>(mesh->mNormals[i].x),
-                    static_cast<float>(mesh->mNormals[i].y),
-                    static_cast<float>(mesh->mNormals[i].z)
-                ) : vec3(), mesh->HasTangentsAndBitangents() ? vec3(
-                    static_cast<float>(mesh->mTangents[i].x),
-                    static_cast<float>(mesh->mTangents[i].y),
-                    static_cast<float>(mesh->mTangents[i].z)
-                ) : vec3(), mesh->HasTangentsAndBitangents() ? vec3(
-                    static_cast<float>(mesh->mBitangents[i].x),
-                    static_cast<float>(mesh->mBitangents[i].y),
-                    static_cast<float>(mesh->mBitangents[i].z)
-                ) : vec3(), mesh->mTextureCoords[0] ? vec2(
-                    static_cast<float>(mesh->mTextureCoords[0][i].x),
-                    static_cast<float>(mesh->mTextureCoords[0][i].y)
-                ) : vec2());
-            }
+            bool normals = (*mesh)->HasNormals(), tnbt = (*mesh)->HasTangentsAndBitangents(), tc = (*mesh)->mTextureCoords[0];
+            for (unsigned int i = 0; i < (*mesh)->mNumVertices; ++i)
+                vertices.emplace_back(
+                    vec3((*mesh)->mVertices[i].x, (*mesh)->mVertices[i].y, (*mesh)->mVertices[i].z),
+                    normals ? vec3((*mesh)->mNormals[i].x, (*mesh)->mNormals[i].y, (*mesh)->mNormals[i].z) : vec3(),
+                    tnbt ? vec3((*mesh)->mTangents[i].x, (*mesh)->mTangents[i].y, (*mesh)->mTangents[i].z) : vec3(),
+                    tnbt ? vec3((*mesh)->mBitangents[i].x, (*mesh)->mBitangents[i].y, (*mesh)->mBitangents[i].z) : vec3(),
+                    tc ? vec2((*mesh)->mTextureCoords[0][i].x, (*mesh)->mTextureCoords[0][i].y) : vec2()
+                );
             std::vector<unsigned int> indices;
-            std::for_each(mesh->mFaces, mesh->mFaces + mesh->mNumFaces, [&indices](const aiFace& face) noexcept {
-                std::for_each(face.mIndices, face.mIndices + face.mNumIndices, [&indices](const unsigned int index) noexcept {
-                    indices.emplace_back(index);
-                });
-            });
-            meshes.emplace_back(vertices, indices, scene->mMaterials[mesh->mMaterialIndex], dir);
-        });
+            for (aiFace* face = (*mesh)->mFaces, *eof = (*mesh)->mFaces + (*mesh)->mNumFaces; face != eof; ++face)
+                indices.insert(indices.end(), face->mIndices, face->mIndices + face->mNumIndices);
+            meshes.emplace_back(vertices, indices, scene->mMaterials[(*mesh)->mMaterialIndex], dir);
+        }
     }
 
     void draw(const Shader& shader) const noexcept {
@@ -293,10 +276,8 @@ public:
     }
 
     ~Model() {
-        for (const Mesh& mesh : meshes) {
-            glDeleteVertexArrays(1, &mesh.vao);
-            glDeleteBuffers(2, mesh.vebo);
-        }
+        for (const Mesh& mesh : meshes)
+            mesh.clear();
     };
 };
 

@@ -44,6 +44,10 @@ void mouse_handler(GLFWwindow* window, double x, double y) {
     xp = x; yp = y;
 }
 
+template<typename Fun, typename... Arg> decltype(auto) transparent(Fun fun, Arg&& ...arg) {
+    return fun(std::forward<Arg>(arg)...);
+}
+
 int main() {
     // GLFW Init
     glfwInit();
@@ -70,7 +74,7 @@ int main() {
     });
     glfwSetCursorPosCallback(window, mouse_handler);
     glEnable(GL_DEPTH_TEST);
-    glDepthFunc(GL_LESS);
+    glEnable(GL_BLEND);
     glEnable(GL_STENCIL_TEST);
     glStencilFunc(GL_NOTEQUAL, 1, 0xFF);
     glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
@@ -121,8 +125,6 @@ int main() {
         shader.setUniform("sl.dir", vec3(view.matmul(vec4(sl.dir, 0.))));
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
         // Draw call
-        glStencilFunc(GL_ALWAYS, 1, 0xFF);
-        glStencilMask(0xFF);
         m.draw(shader);
         // Outline
         glStencilFunc(GL_EQUAL, 0, 0xFF);
@@ -135,7 +137,7 @@ int main() {
         outline.setUniform("outlineColor", {1., 1., 0., 1.});
         m.draw(outline);
         glStencilMask(0xFF);
-        glStencilFunc(GL_ALWAYS, 0, 0xFF);
+        glStencilFunc(GL_ALWAYS, 1, 0xFF);
         glEnable(GL_DEPTH_TEST);
         // Swap
         glfwSwapBuffers(window);
