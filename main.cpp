@@ -49,6 +49,23 @@ template<typename Fun, typename... Arg> decltype(auto) transparent(Fun fun, Arg&
 }
 
 int main() {
+//    mat<float, 5, 5> a {
+//        {1, 2, 3, 4, -1},
+//        {3, 4, 5, 6, 2},
+//        {5, 6, 7, 8, -3},
+//        {7, 8, 9, 10, 4},
+//        {-1, 2, -3, 4, -5}
+//    };
+//    mat<float, 5, 5> b {
+//        {2, 1, 3, -4, 1},
+//        {4, 3, 3, 0, 2},
+//        {6, 5, 7, 1, 3},
+//        {8, 9, 11, 10, 4},
+//        {1, 2, 3, 4, 5}
+//    };
+    mat4 b = mat4::perspective(0.75, 1.5, 1, 100);
+    std::cout << b;
+    return 0;
     // GLFW Init
     glfwInit();
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);

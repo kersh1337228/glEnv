@@ -3,62 +3,112 @@
 
 #include <iostream>
 #include <execution>
+#include <cassert>
+#include <concepts>
 
 #define PI std::acos(-1.0f)
 
+template<typename To, typename... From>
+concept is_all_convertible = requires(To to, From... from) {
+    (std::is_convertible_v<From, To> && ...);
+};
+
+template<
+    typename T, std::size_t n,
+    typename Category = std::contiguous_iterator_tag,
+    typename Distance = ptrdiff_t,
+    typename Pointer = T*,
+    typename Reference = T&
+> class n_step_iterator {
+public:
+    using iterator_category = Category;
+    using value_type = T;
+    using difference_type = Distance;
+    using pointer = Pointer;
+    using reference = Reference;
+private:
+    pointer ptr;
+public:
+    explicit n_step_iterator(pointer ptr = nullptr): ptr(ptr) {}
+    n_step_iterator(const n_step_iterator& other): ptr(other.ptr) {}
+public:
+    inline reference operator*() const { return *ptr; }
+    inline pointer operator->() const { return ptr; }
+public:
+    n_step_iterator& operator++() { ptr += n; return *this; }
+    n_step_iterator& operator--() { ptr -= n; return *this; }
+public:
+    n_step_iterator operator++(int) { n_step_iterator old = *this; ptr += n; return old; }
+    n_step_iterator operator--(int) { n_step_iterator old = *this; ptr -= n; return old; }
+public:
+    n_step_iterator& operator+(difference_type d) { ptr += n * d; return *this; }
+    n_step_iterator& operator-(difference_type d) { ptr -= n * d; return *this; }
+    friend inline n_step_iterator& operator+(difference_type d, const n_step_iterator& it) {return n_step_iterator(n * d + it.ptr);}
+    friend inline n_step_iterator& operator-(difference_type d, const n_step_iterator& it) {return n_step_iterator(n * d - it.ptr);}
+public:
+    inline reference operator[](difference_type d) const { return ptr[d]; }
+    inline difference_type operator-(const n_step_iterator& other) { return (ptr - other.ptr) / n; }
+public:
+    inline friend auto operator<=>(const n_step_iterator& a, const n_step_iterator& b) { return a.ptr <=> b.ptr; }
+    inline friend bool operator==(const n_step_iterator& a, const n_step_iterator& b) { return a.ptr == b.ptr; }
+    inline friend bool operator!=(const n_step_iterator& a, const n_step_iterator& b) { return a.ptr != b.ptr; }
+};
+
+template<typename T, typename... Skip>
+constexpr T take_first(T val, Skip...){
+    return val;
+}
+template<typename T, typename Arg, size_t... Idxs>
+constexpr T subs(Arg arg, std::index_sequence<Idxs...>){
+    return T(take_first(arg, Idxs)...);
+}
+template<std::size_t n, typename T, typename Arg>
+constexpr T subs_n_times(Arg arg) {
+    return subs<T, Arg>(arg, std::make_index_sequence<n>{});
+}
+
 template<typename T>
-[[nodiscard]] inline T radians(T&& degrees) {
-    static_assert(std::is_arithmetic_v<T>);
+[[nodiscard]] inline T radians(T&& degrees) requires std::is_arithmetic_v<T> {
     return PI / 180. * std::forward<T>(degrees);
 }
 
 template <typename T, std::size_t n>
+requires std::is_arithmetic_v<T> && (n > 1)
 struct vec final {
-    static_assert(std::is_arithmetic_v<T>, "Only arithmetic types are allowed.");
-    static_assert(n > 1, "Vector must have at least 2 components.");
 private:
     T components[n] {};
 public:
     vec() = default;
 
     template<typename T_, typename... U>
-    vec(T_&& a, U&&... b)
-    requires (
-        std::is_nothrow_convertible_v<std::remove_reference_t<T_>, T> &&
-        (std::is_nothrow_convertible_v<std::remove_reference_t<U>, T> && ...)
-    ) && (1 + sizeof...(U) == n) : components {std::forward<T>(a), std::forward<T>(b)...} {}
+    constexpr vec(T_&& a, U&&... b)
+    requires (1 + sizeof...(U) == n) && is_all_convertible<T, T_, U...>
+        : components {std::forward<T>(a), std::forward<T>(b)...} {}
 
     template<typename T_>
-    vec(const T_(&init)[n]) {
-        std::move(init, init + n, components);
+    vec(const T_(&init)[n]) { // TODO: Delete or unpack
+        std::move(std::execution::par_unseq, init, init + n, components);
     }
 
     template <std::size_t m>
     explicit vec(const vec<T, m>& v) requires (n <= m) {
-        const T* vp = reinterpret_cast<const T*>(&v);
-        std::copy_n(vp, n, components);
+        std::copy_n(std::execution::par_unseq, reinterpret_cast<const T*>(&v), n, components);
     }
 
     template <std::size_t m, typename T_, typename... U>
     vec(const vec<T, m>& v, T_&& a, U&&... b)
-    requires (n > m) && (
-        std::is_nothrow_convertible_v<std::remove_reference_t<T_>, T> &&
-        (std::is_nothrow_convertible_v<std::remove_reference_t<U>, T> && ...)
-    ) && (1 + sizeof...(U) == n - m) : components {std::forward<T>(a), std::forward<T>(b)...}  {
-        std::move(components, components + n - m, components + m);
-        std::copy_n(reinterpret_cast<const T*>(&v), m, components);
+    requires  (n > m) && (1 + sizeof...(U) == n - m) && is_all_convertible<T, T_, U...>
+        : components {std::forward<T>(a), std::forward<T>(b)...}  {
+        std::move(std::execution::par_unseq, components, components + n - m, components + m);
+        std::copy_n(std::execution::par_unseq, reinterpret_cast<const T*>(&v), m, components);
     }
 
-    [[nodiscard]] constexpr static inline vec<T, n> null() noexcept {
-        return {};
-    }
+    constexpr vec(T value): vec(subs_n_times<n, vec, T>(value)) {}
 
-    [[nodiscard]] constexpr static inline vec<T, n> identity() {
-        vec<T, n> result;
-        std::fill_n(reinterpret_cast<T*>(&result), n, T(1));
-        return result;
-    }
+    [[nodiscard]] constexpr static inline vec<T, n> null() noexcept { return {}; }
 
+    [[nodiscard]] constexpr static inline vec<T, n> identity() { return 1; }
+public:
     [[nodiscard]] inline T* begin() const noexcept {
         return const_cast<T*>(components);
     }
@@ -86,7 +136,7 @@ public:
     [[nodiscard]] inline T& operator [] (int i) const {
         return const_cast<T&>(components[i]);
     }
-
+public:
     [[nodiscard]] inline T len2() const noexcept {
         return std::transform_reduce(
             std::execution::par_unseq,
@@ -111,7 +161,7 @@ public:
         );
     };
 
-    [[nodiscard]] inline vec<T, 3> cross(const vec<T, 3>& other) const noexcept {
+    [[nodiscard]] constexpr inline vec<T, 3> cross(const vec<T, 3>& other) const noexcept {
         return {
             components[1] * other.components[2] - components[2] * other.components[1],
             components[2] * other.components[0] - components[0] * other.components[2],
@@ -225,7 +275,7 @@ public:
 
     friend std::ostream& operator << (std::ostream& out, const vec<T, n>& v) {
         out << "vec" << n << "{ ";
-        std::copy_n(v.components, n, std::ostream_iterator<T>(out, ", "));
+        std::copy_n(std::execution::par_unseq, v.components, n, std::ostream_iterator<T>(out, ", "));
         out << "\b\b }";
         return out;
     }
@@ -248,47 +298,55 @@ using lvec3 = vec<long, 3>;
 using lvec4 = vec<long, 4>;
 
 template<typename T, std::size_t n, std::size_t m>
+requires std::is_arithmetic_v<T> && (n > 1)
 struct mat final {
-    static_assert(std::is_arithmetic_v<T>, "Only arithmetic types are allowed.");
-    static_assert(n > 1, "Matrix must have at least 2 rows.");
+    using diag_iterator = n_step_iterator<T, m + 1, std::bidirectional_iterator_tag>;
+    using col_iterator = n_step_iterator<T, m, std::bidirectional_iterator_tag>;
+    using row_t = vec<T, m>;
+    using col_t = vec<T, n>;
 private:
-    vec<T, m> rows[n] {};
+    row_t rows[n] {};
 public:
-    mat() = default;
+    constexpr mat() = default;
 
     template<typename... U>
-    mat(const T(&a)[m], const U(&...b)[m])
-    requires (std::is_nothrow_convertible_v<T, U> && ...) && (1 + sizeof...(U) == n)
+    constexpr mat(const T(&a)[m], const U(&...b)[m])
+    requires (1 + sizeof...(U) == n) && is_all_convertible<T, U...>
     : rows {vec<T, m>(a), vec<T, m>(b)...} {}
 
     mat(const vec<T, std::min(n, m)>& diag) {
-        for (std::size_t i = 0, end = std::min(n, m); i < end; ++i)
-            rows[i][i] = diag[i];
+        std::copy_n(
+            std::execution::par_unseq,
+            reinterpret_cast<const T*>(&diag), std::min(n, m),
+            diag_iterator(reinterpret_cast<T*>(rows))
+        );
     }
 
     mat(vec<T, std::min(n, m)>&& diag) {
-        for (std::size_t i = 0, end = std::min(n, m); i < end; ++i)
-            rows[i][i] = diag[i];
+        std::copy_n(
+            std::execution::par_unseq,
+            reinterpret_cast<const T*>(std::move(diag).begin()), std::min(n, m),
+            diag_iterator(reinterpret_cast<T*>(rows))
+        );
     }
 
-    explicit mat(T fill_diag) {
-        for (std::size_t i = 0, end = std::min(n, m); i < end; ++i)
-            rows[i][i] = fill_diag;
+    mat(T fill_diag) {
+        std::fill_n(
+            std::execution::par_unseq,
+            diag_iterator(reinterpret_cast<T*>(rows)),
+            std::min(n, m), fill_diag
+        );
     }
 
     template <std::size_t n_, std::size_t m_>
-    mat(mat<T, n_, m_>& other) requires (n <= n_) && (m <= m_) {
+    mat(const mat<T, n_, m_>& other) requires (n <= n_) && (m <= m_) {
         for (std::size_t i = 0; i < n; ++i)
             std::copy_n(reinterpret_cast<T*>(&other) + i * m_, m, reinterpret_cast<T*>(rows) + i * m);
     }
 
-    [[nodiscard]] constexpr static inline mat<T, n, m> null() noexcept {
-        return {};
-    }
+    [[nodiscard]] constexpr static inline mat<T, n, m> null() noexcept { return {}; }
 
-    [[nodiscard]] constexpr static inline mat<T, n, m> identity() noexcept {
-        return mat<T, n, m>(T(1));
-    }
+    [[nodiscard]] constexpr static inline mat<T, n, m> identity() noexcept { return 1; }
 
     [[nodiscard]] inline T* begin() const noexcept {
         return rows;
@@ -303,18 +361,33 @@ public:
     }
 
     [[nodiscard]] inline vec<T, n> col (int j) const {
+        assert(0 <= j && j < m);
         vec<T, n> result;
-        for (std::size_t i = 0; i < n; ++i)
-            result[i] = rows[i][j];
+        std::copy_n(
+            std::execution::par_unseq,
+            col_iterator(const_cast<T*>(reinterpret_cast<const T*>(rows)) + j),
+            n, reinterpret_cast<T*>(&result)
+        );
         return result;
     }
 
     template<std::size_t l>
-    [[nodiscard]] mat<T, n, m> matmul (const mat<T, m, l>& other) const {
-        mat<T, n, m> result;
-        for (std::size_t i = 0; i < n; ++i)
-            for (std::size_t j = 0; j < l; ++j)
-                result.rows[i][j] = rows[i].dot(other.col(j));
+    [[nodiscard]] mat<T, n, l> matmul (const mat<T, m, l>& other) const {
+        mat<T, n, l> result;
+        vec<T, m>* cols = other.transpose().rows;
+        std::transform(
+            std::execution::par_unseq, rows, rows + n,
+            result.rows,
+            [&cols](const vec<T, m>& row) {
+                vec<T, l> temp;
+                std::transform(
+                    std::execution::par_unseq, cols, cols + l,
+                    reinterpret_cast<T*>(&temp),
+                    [&row](const vec<T, m>& col) { return row.dot(col); }
+                );
+                return temp;
+            }
+        );
         return result;
     };
 
@@ -328,10 +401,14 @@ public:
         return result;
     }
 
-    [[nodiscard]] mat<T, m, n> transpose() const {
+    [[nodiscard]] inline mat<T, m, n> transpose() const {
         mat<T, m, n> result;
         for (std::size_t j = 0; j < m; ++j)
-            result.rows[j] = this->col(j);
+            std::copy_n(
+                std::execution::par_unseq,
+                col_iterator(const_cast<T*>(reinterpret_cast<const T*>(rows)) + j),
+                n, reinterpret_cast<T*>(&result.rows[j])
+            );
         return result;
     }
 
@@ -383,18 +460,20 @@ public:
         return adj / this->det();
     }
 
-    [[nodiscard]] float track() const {
-        float result(0.0f);
-        for (std::size_t i = 0; i < n; ++i)
-            result += rows[i][i];
-        return result;
+    [[nodiscard]] T track() const {
+        return std::reduce(
+            std::execution::par_unseq,
+            diag_iterator(const_cast<T*>(reinterpret_cast<const T*>(rows))),
+            diag_iterator(const_cast<T*>(reinterpret_cast<const T*>(rows))) + std::min(n, m),
+            T(0), std::plus{}
+        );
     }
 
     [[nodiscard]] T* raw() const {
         return const_cast<T*>(&rows[0][0]);
     }
 
-    [[nodiscard]] static mat<T, 4, 4> perspective(float FoV, float ar, float near, float far) noexcept requires (n == 4) && (n == m) {
+    [[nodiscard]] constexpr static mat<T, 4, 4> perspective(float FoV, float ar, float near, float far) noexcept requires (n == 4) && (n == m) {
         return {
             {static_cast<float>(1. / ar / tan(FoV / 2.)), T(0), T(0), T(0)},
             {T(0), static_cast<float>(1. / tan(FoV / 2.)), T(0), T(0)},
@@ -402,7 +481,7 @@ public:
             {T(0), T(0), T(-1), T(0)}
         };
     }
-    [[nodiscard]] static mat<T, 4, 4> ortho(float w, float h, float near, float far) noexcept requires (n == 4) && (n == m) {
+    [[nodiscard]] constexpr static mat<T, 4, 4> ortho(float w, float h, float near, float far) noexcept requires (n == 4) && (n == m) {
         return {
             {2. / w, T(0), T(0), T(0)},
             {T(0), 2. / h, T(0), T(0)},
@@ -411,7 +490,7 @@ public:
         };
     }
 
-    [[nodiscard]] static inline mat<T, 4, 4> translate(const vec<T, 3>& d) noexcept requires (n == 4) && (n == m) {
+    [[nodiscard]] constexpr static inline mat<T, 4, 4> translate(const vec<T, 3>& d) noexcept requires (n == 4) && (n == m) {
         return {
             {T(1), T(0), T(0), d.x()},
             {T(0), T(1), T(0), d.y()},
@@ -420,7 +499,7 @@ public:
         };
     }
 
-    [[nodiscard]] static inline mat<T, 3, 3> scale(const vec<T, 3>& s) noexcept requires (n == 3) && (n == m) {
+    [[nodiscard]] constexpr static inline mat<T, 3, 3> scale(const vec<T, 3>& s) noexcept requires (n == 3) && (n == m) {
         return {
             {s.x(), T(0), T(0)},
             {T(0), s.y(), T(0)},
@@ -429,7 +508,7 @@ public:
     }
 
     template<typename ...U>
-    [[nodiscard]] static inline mat<T, 4, 4> scale(const vec<T, 3>& s) noexcept requires (n == 4) && (n == m) {
+    [[nodiscard]] constexpr static inline mat<T, 4, 4> scale(const vec<T, 3>& s) noexcept requires (n == 4) && (n == m) {
         return {
             {s.x(), T(0), T(0), T(0)},
             {T(0), s.y(), T(0), T(0)},
@@ -438,7 +517,7 @@ public:
         };
     }
 
-    [[nodiscard]] static inline mat<T, 2, 2> rotate(T angle) noexcept {
+    [[nodiscard]] constexpr static inline mat<T, 2, 2> rotate(T angle) noexcept {
         const T c = T(std::cos(angle));
         const T s = T(std::sin(angle));
         return {
@@ -447,7 +526,7 @@ public:
         };
     }
 
-    [[nodiscard]] static inline mat<T, 3, 3> rotate(T angle, const vec<T, 3>& axis) noexcept requires (n == m == 3) {
+    [[nodiscard]] constexpr static inline mat<T, 3, 3> rotate(T angle, const vec<T, 3>& axis) noexcept requires (n == m == 3) {
         const vec3 a = axis.normalize();
         const T c = T(std::cos(angle));
         const T s = T(std::sin(angle));
@@ -468,7 +547,7 @@ public:
         };
     }
 
-    [[nodiscard]] static inline mat<T, 4, 4> rotate(T angle, const vec3& axis) noexcept requires (n == m == 4) {
+    [[nodiscard]] constexpr static inline mat<T, 4, 4> rotate(T angle, const vec3& axis) noexcept requires (n == m == 4) {
         const vec3 a = axis.normalize();
         const T c = T(std::cos(angle));
         const T s = T(std::sin(angle));
@@ -626,72 +705,72 @@ public:
     vec3 v;
     float w;
 public:
-    quat(float w = 0, float x = 0, float y = 0, float z = 0): w(w), v(x, y, z) {}
-    quat(float w = 0, const vec3& v = {}): w(w), v(v) {}
+    constexpr quat(float w = 0, float x = 0, float y = 0, float z = 0): w(w), v(x, y, z) {}
+    constexpr quat(float w = 0, const vec3& v = {}): w(w), v(v) {}
 
-    [[nodiscard]] static inline quat null () noexcept {
+    [[nodiscard]] consteval static inline quat null () noexcept {
         return {0.0f, 0.0f, 0.0f, 0.0f};
     }
 
-    [[nodiscard]] static inline quat identity () noexcept {
+    [[nodiscard]] consteval static inline quat identity () noexcept {
         return {1.0f, 0.0f, 0.0f, 0.0f};
     }
 
-    [[nodiscard]] float len() const noexcept {
+    [[nodiscard]] constexpr float len() const noexcept {
         return std::sqrt(w * w + v.x() * v.x() + v.y() * v.y() + v.z() * v.z());
     }
 
-    [[nodiscard]] quat norm() const noexcept {
+    [[nodiscard]] constexpr quat norm() const noexcept {
         return *this / this->len();
     }
 
-    [[nodiscard]] inline quat operator + (const quat& other) const noexcept {
+    [[nodiscard]] constexpr inline quat operator + (const quat& other) const noexcept {
         return { w + other.w, v + other.v };
     };
 
-    [[nodiscard]] inline quat operator - (const quat& other) const noexcept {
+    [[nodiscard]] constexpr inline quat operator - (const quat& other) const noexcept {
         return { w - other.w, v - other.v };
     };
 
     template <typename T>
-    [[nodiscard]] inline quat operator * (T lam) const noexcept {
+    [[nodiscard]] constexpr inline quat operator * (T lam) const noexcept {
         return { w * lam, v * lam };
     };
 
-    [[nodiscard]] inline quat operator * (const quat& other) const noexcept {
+    [[nodiscard]] constexpr inline quat operator * (const quat& other) const noexcept {
         return { w * other.w, v * other.v };
     };
 
     template <typename T>
-    [[nodiscard]] inline quat operator / (T lam) const noexcept {
+    [[nodiscard]] constexpr inline quat operator / (T lam) const noexcept {
         return { w / lam, v / lam };
     };
 
-    [[nodiscard]] inline quat operator / (const quat& other) const noexcept {
+    [[nodiscard]] constexpr inline quat operator / (const quat& other) const noexcept {
         return { w / other.w, v / other.v };
     };
 
-    [[nodiscard]] inline static quat quatmul(const quat& a, const quat& b) noexcept {
+    [[nodiscard]] constexpr inline static quat quatmul(const quat& a, const quat& b) noexcept {
         return {
             a.w * b.w - a.v.dot(b.v),
             b.v * a.w + a.v * b.w + a.v.cross(b.v)
         };
     }
 
-    [[nodiscard]] inline static quat rotate(float angle, const vec3& axis) noexcept {
+    [[nodiscard]] constexpr inline static quat rotate(float angle, const vec3& axis) noexcept {
         return {static_cast<float>(cos(angle / 2.)), axis.normalize() * std::sin(angle / 2.)};
     }
 
-    [[nodiscard]] inline quat quatmul(const quat& other) const noexcept {
+    [[nodiscard]] constexpr inline quat quatmul(const quat& other) const noexcept {
         return {
             w * other.w - v.dot(other.v),
             other.v * w + v * other.w + v.cross(other.v)
         };
     };
-    [[nodiscard]] inline quat conj() const noexcept {
+    [[nodiscard]] constexpr inline quat conj() const noexcept {
         return {w, -v};
     }
-    [[nodiscard]] inline mat4 to_mat4() const noexcept {
+    [[nodiscard]] constexpr inline mat4 to_mat4() const noexcept {
         return {
             {1 - 2 * (v.y() * v.y() + v.z() * v.z()), 2 * (v.x() * v.y() - v.z() * w), 2 * (v.x() * v.z() + v.y() * w), 0.0f},
             {2 * (v.x() * v.y() + v.z() * w), 1 - 2 * (v.x() * v.x() + v.z() * v.z()), 2 * (v.y() * v.z() - v.x() * w), 0.0f},
@@ -699,7 +778,7 @@ public:
             {0.0f, 0.0f, 0.0f, 1.0f}
         };
     }
-    [[nodiscard]] inline mat3 to_mat3() const noexcept {
+    [[nodiscard]] constexpr inline mat3 to_mat3() const noexcept {
         return {
             {1 - 2 * (v.y() * v.y() + v.z() * v.z()), 2 * (v.x() * v.y() - v.z() * w), 2 * (v.x() * v.z() + v.y() * w)},
             {2 * (v.x() * v.y() + v.z() * w), 1 - 2 * (v.x() * v.x() + v.z() * v.z()), 2 * (v.y() * v.z() - v.x() * w)},
