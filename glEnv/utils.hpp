@@ -1,8 +1,7 @@
 #ifndef GL_ENV_UTILS_HPP
 #define GL_ENV_UTILS_HPP
 
-template <typename... T>
-constexpr void do_nothing(T&&...) {}
+inline constexpr void do_nothing(...) noexcept {}
 
 template<typename To, typename... From>
 concept is_all_convertible = requires(To to, From... from) {
@@ -139,8 +138,8 @@ public:
 public:
     inline n_step_iterator& operator+=(difference_type d) { ptr += n * d; return *this; }
     inline n_step_iterator& operator-=(difference_type d) { ptr -= n * d; return *this; }
-    inline n_step_iterator operator+(difference_type d) const { return enum_iterator(ptr + n * d); }
-    inline n_step_iterator operator-(difference_type d) const { return enum_iterator(ptr - n * d); }
+    inline n_step_iterator operator+(difference_type d) const { return n_step_iterator(ptr + n * d); }
+    inline n_step_iterator operator-(difference_type d) const { return n_step_iterator(ptr - n * d); }
     friend inline n_step_iterator operator+(difference_type d, const n_step_iterator& it) { return n_step_iterator(n * d + it.ptr); }
     friend inline n_step_iterator operator-(difference_type d, const n_step_iterator& it) { return n_step_iterator(n * d - it.ptr); }
 public:
@@ -152,28 +151,28 @@ public:
     inline friend bool operator!=(const n_step_iterator& a, const n_step_iterator& b) { return a.ptr != b.ptr; }
 };
 
-template<typename T, typename... Skip>
-constexpr T take_first(T val, Skip...){
+template<typename T>
+[[nodiscard]] inline constexpr T take_first(T val, ...) noexcept {
     return val;
 }
 
 template<typename T, typename Arg, size_t... Idxs>
-constexpr T subs(Arg arg, std::index_sequence<Idxs...>){
+[[nodiscard]] inline constexpr T subs(Arg arg, std::index_sequence<Idxs...>) {
     return T(take_first(arg, Idxs)...);
 }
 
 template<std::size_t n, typename T, typename Arg>
-constexpr T subs_n_times(Arg arg) {
+[[nodiscard]] inline constexpr T subs_n_times(Arg arg) {
     return subs<T, Arg>(arg, std::make_index_sequence<n>{});
 }
 
 template<typename T, typename U, size_t... Idxs>
-constexpr void do_unpack(T from, U to, std::index_sequence<Idxs...>){
+inline constexpr void do_unpack(T from, U to, std::index_sequence<Idxs...>) {
     do_nothing(to[Idxs] = from[Idxs]...);
 }
 
 template<std::size_t n, typename T, typename U>
-constexpr void unpack(T from, U to) {
+inline constexpr void unpack(T from, U to) {
     do_unpack<T, U>(from, to, std::make_index_sequence<n>{});
 }
 

@@ -45,6 +45,16 @@ void mouse_handler(GLFWwindow* window, double x, double y) {
 }
 
 int main() {
+//    mat4 m4 {{1, 2, 3, 4}};
+    mat4 m4 {
+        1, 2, 3, 4,
+        1, 2, 3, 4,
+        1, 2, 3, 4,
+        1, 2, 3, 4
+    };
+//    vec4 v4 {3.14};
+    std::cout << m4.track();
+    return 0;
     // GLFW Init
     glfwInit();
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);

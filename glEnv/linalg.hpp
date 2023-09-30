@@ -25,33 +25,36 @@ public:
     template<is_all_convertible<T>... U>
     constexpr vec(U&&... a)
     requires (sizeof...(U) == n)
-        : components {std::forward<T>(a)...} {}
-
-    template<is_all_convertible<T> U>
-    vec(const U(&init)[n]) {
-        unpack<n>(init, components);
-    }
-
-    template <std::size_t m>
-    explicit vec(const vec<T, m>& v) requires (n <= m) {
-        unpack<n>(v, components);
-    }
+    : components {std::forward<T>(a)...} {}
 private:
-    template <size_t... Idxs, is_all_convertible<T>... U>
-    vec(std::index_sequence<Idxs...>, U&&... a): components {Idxs..., std::forward<T>(a)...} {}
+    template <size_t... Idxs, is_all_convertible<T> U>
+    vec(const U(&init)[n], std::index_sequence<Idxs...>): components {init[Idxs]...} {}
+public:
+    template<is_all_convertible<T> U>
+    vec(const U(&init)[n]): vec(init, std::make_index_sequence<n>{}) {}
+private:
+    template <size_t... Idxs, std::size_t m>
+    vec(const vec<T, m>& v, std::index_sequence<Idxs...>): components {v[Idxs]...} {}
+public:
+    template <std::size_t m>
+    explicit vec(const vec<T, m>& v) requires (n <= m): vec(v, std::make_index_sequence<n>{}) {}
+private:
+    template <std::size_t m, size_t... Idxs, is_all_convertible<T>... U>
+    vec(std::index_sequence<Idxs...>, const vec<T, m>& v, U&&... a): components {v[Idxs]..., std::forward<T>(a)...} {}
 public:
     template <std::size_t m, is_all_convertible<T>... U>
     vec(const vec<T, m>& v, U&&... a)
     requires  (n > m) && (sizeof...(U) == n - m)
-    : vec(std::make_index_sequence<m>{}, std::forward<T>(a)...) {
-        unpack<m>(v, components);
-    }
-
-    constexpr vec(T value): vec(subs_n_times<n, vec, T>(value)) {}
+    : vec(std::make_index_sequence<m>{}, v, std::forward<T>(a)...) {}
+private:
+    template <size_t... Idxs>
+    vec(T fill, std::index_sequence<Idxs...>): components {take_first(fill, Idxs)...} {}
+public:
+    constexpr vec(T fill): vec(fill, std::make_index_sequence<n>{}) {}
 
     [[nodiscard]] constexpr static inline vec<T, n> null() noexcept { return {}; }
 
-    [[nodiscard]] constexpr static inline vec<T, n> identity() { return 1; }
+    [[nodiscard]] constexpr static inline vec<T, n> identity() noexcept { return 1; }
 public:
     [[nodiscard]] inline T* begin() const noexcept {
         return const_cast<T*>(components);
@@ -252,44 +255,43 @@ struct mat final {
     using row_t = vec<T, m>;
     using col_t = vec<T, n>;
 private:
-    row_t rows[n] {};
+    union {
+        row_t rows[n];
+        T raws[n * m];
+    };
 public:
-    constexpr mat() = default;
+    constexpr mat(): raws {} {};
 
     template<is_all_convertible<T>... U>
-    constexpr mat(const T(&a)[m], const U(&...b)[m])
-    requires (1 + sizeof...(U) == n)
-    : rows {row_t(a), row_t(b)...} {}
+    constexpr mat(U&&... a)
+    requires (sizeof...(U) == n * m)
+    : raws {std::forward<T>(a)...} {}
 
-    mat(const vec<T, std::min(n, m)>& diag) {
-        std::copy_n(
-            std::execution::par_unseq,
-            reinterpret_cast<const T*>(&diag), std::min(n, m),
-            diag_iterator(reinterpret_cast<T*>(rows))
-        );
-    }
-
-    mat(vec<T, std::min(n, m)>&& diag) {
-        std::copy_n(
-            std::execution::par_unseq,
-            reinterpret_cast<const T*>(std::move(diag).begin()), std::min(n, m),
-            diag_iterator(reinterpret_cast<T*>(rows))
-        );
-    }
-
-    mat(T fill_diag) {
-        std::fill_n(
-            std::execution::par_unseq,
-            diag_iterator(reinterpret_cast<T*>(rows)),
-            std::min(n, m), fill_diag
-        );
-    }
+    template<is_all_convertible<T>... U>
+    constexpr mat(const U(&...a)[m])
+    requires (sizeof...(U) == n)
+    : rows {row_t(a)...} {}
+private:
+    template <size_t... Idxs>
+    mat(std::index_sequence<Idxs...>, const vec<T, std::min(n, m)>& diag)
+        : mat {(!(Idxs % (m + 1)) * diag[Idxs / m])...} {}
+public:
+    mat(const vec<T, std::min(n, m)>& diag)
+    : mat(std::make_index_sequence<n * m>{}, diag) {}
+private:
+    template <size_t... Idxs>
+    mat(std::index_sequence<Idxs...>, T fill_diag)
+    : mat {(!(Idxs % (m + 1)) * fill_diag)...} {}
+public:
+    mat(T fill_diag): mat(std::make_index_sequence<n * m>{}, fill_diag) {}
 
     template <std::size_t n_, std::size_t m_>
     mat(const mat<T, n_, m_>& other) requires (n <= n_) && (m <= m_) {
         std::for_each_n(
             std::execution::par_unseq,
-            parallel_iterator(rows, reinterpret_cast<const std::remove_cvref_t<decltype(other)>::row_t*>(&other)), n,
+            parallel_iterator(rows, reinterpret_cast<
+                const std::remove_cvref_t<decltype(other)>::row_t*
+            >(&other)), n,
             [&other](auto&& row) {
                 std::copy_n(
                     std::execution::par_unseq,
@@ -315,15 +317,14 @@ public:
     inline row_t& operator [] (int i) const {
         return const_cast<row_t&>(rows[i]);
     }
-
+private:
+    template <size_t... Idxs>
+    [[nodiscard]] inline vec<T, n> get_col (int j, std::index_sequence<Idxs...>) const {
+        return { const_cast<T&>(*&raws[Idxs * m + j])... };
+    }
+public:
     [[nodiscard]] inline vec<T, n> col (int j) const {
-        vec<T, n> result;
-        std::copy_n(
-            std::execution::par_unseq,
-            col_iterator(const_cast<T*>(reinterpret_cast<const T*>(rows)) + j),
-            n, reinterpret_cast<T*>(&result)
-        );
-        return result;
+        return get_col(j, std::make_index_sequence<n>{});
     }
 
     template<std::size_t l>
@@ -363,7 +364,7 @@ public:
             enum_iterator(&result.rows[0]), n, [this](auto&& row) {
             std::copy_n(
                 std::execution::par_unseq,
-                col_iterator(const_cast<T*>(reinterpret_cast<const T*>(rows)) + std::get<1>(row)),
+                col_iterator(const_cast<T*>(raws) + std::get<1>(row)),
                 n, reinterpret_cast<T*>(&std::get<0>(row))
             );
         });
@@ -450,8 +451,8 @@ public:
     [[nodiscard]] T track() const {
         return std::reduce(
             std::execution::par_unseq,
-            diag_iterator(const_cast<T*>(reinterpret_cast<const T*>(rows))),
-            diag_iterator(const_cast<T*>(reinterpret_cast<const T*>(rows))) + std::min(n, m),
+            diag_iterator(const_cast<T*>(raws)),
+            diag_iterator(const_cast<T*>(raws)) + std::min(n, m),
             T(0), std::plus{}
         );
     }
