@@ -1,6 +1,5 @@
-#ifndef GL_TEST_PRIMITIVES_HPP
-
-#define GL_TEST_PRIMITIVES_HPP
+#ifndef GL_ENV_PRIMITIVES_HPP
+#define GL_ENV_PRIMITIVES_HPP
 
 #include <glad/glad.h>
 #include <stbi/stb_image.h>

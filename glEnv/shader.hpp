@@ -1,11 +1,10 @@
-#ifndef GL_TEST_SHADER_HPP
+#ifndef GL_ENV_SHADER_HPP
+#define GL_ENV_SHADER_HPP
 
-#define GL_TEST_SHADER_HPP
-
-#include "../../../../Software/IDE/CLion/bin/mingw/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/fstream"
-#include "../../../../Software/IDE/CLion/bin/mingw/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/sstream"
-#include "../../../../Software/IDE/CLion/bin/mingw/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/iostream"
-#include "../../../../Software/IDE/CLion/bin/mingw/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/map"
+#include <fstream>
+#include <sstream>
+#include <iostream>
+#include <map>
 #include "linalg.hpp"
 
 class Shader {

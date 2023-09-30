@@ -1,16 +1,16 @@
-#ifndef GL_TEST_GEOMETRY_HPP
-#define GL_TEST_GEOMETRY_HPP
+#ifndef GL_ENV_GEOMETRY_HPP
+#define GL_ENV_GEOMETRY_HPP
 
-#include "../libs/glad-2.0/include/glad/glad.h"
-#include "../libs/assimp-master/include/assimp/Importer.hpp"
-#include "../libs/assimp-master/include/assimp/scene.h"
-#include "../libs/assimp-master/include/assimp/postprocess.h"
-#include "../libs/stbi/include/stbi/stb_image.h"
+#include <glad/glad.h>
+#include <assimp/Importer.hpp>
+#include <assimp/scene.h>
+#include <assimp/postprocess.h>
+#include <stbi/stb_image.h>
 //
-#include "../../../../Software/IDE/CLion/bin/mingw/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/iostream"
-#include "../../../../Software/IDE/CLion/bin/mingw/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/utility"
-#include "../../../../Software/IDE/CLion/bin/mingw/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/vector"
-#include "../../../../Software/IDE/CLion/bin/mingw/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/unordered_map"
+#include <iostream>
+#include <utility>
+#include <vector>
+#include <unordered_map>
 //
 #include "linalg.hpp"
 

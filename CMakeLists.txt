@@ -35,6 +35,7 @@ add_executable(
         glEnv/primitives.hpp
         glEnv/lighting.hpp
         glEnv/geometry.hpp
+        glEnv/utils.hpp
 )
 
 target_link_libraries(${PROJECT_NAME} glfw assimp)

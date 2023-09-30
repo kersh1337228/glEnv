@@ -1,6 +1,5 @@
-#ifndef GL_TEST_LIGHTING_HPP
-
-#define GL_TEST_LIGHTING_HPP
+#ifndef GL_ENV_LIGHTING_HPP
+#define GL_ENV_LIGHTING_HPP
 
 #include "linalg.hpp"
 

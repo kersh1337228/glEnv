@@ -1,6 +1,5 @@
-#ifndef GL_TEST_CAMERA_HPP
-
-#define GL_TEST_CAMERA_HPP
+#ifndef GL_ENV_CAMERA_HPP
+#define GL_ENV_CAMERA_HPP
 
 #include "linalg.hpp"
 

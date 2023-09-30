@@ -1,71 +1,13 @@
-#ifndef GL_TEST_LINALG_HPP
-#define GL_TEST_LINALG_HPP
+#ifndef GL_ENV_LINALG_HPP
+#define GL_ENV_LINALG_HPP
 
 #include <iostream>
 #include <execution>
 #include <cassert>
 #include <concepts>
+#include "utils.hpp"
 
 #define PI std::acos(-1.0f)
-
-template<typename To, typename... From>
-concept is_all_convertible = requires(To to, From... from) {
-    (std::is_convertible_v<From, To> && ...);
-};
-
-template<
-    typename T, std::size_t n,
-    typename Category = std::contiguous_iterator_tag,
-    typename Distance = ptrdiff_t,
-    typename Pointer = T*,
-    typename Reference = T&
-> class n_step_iterator {
-public:
-    using iterator_category = Category;
-    using value_type = T;
-    using difference_type = Distance;
-    using pointer = Pointer;
-    using reference = Reference;
-private:
-    pointer ptr;
-public:
-    explicit n_step_iterator(pointer ptr = nullptr): ptr(ptr) {}
-    n_step_iterator(const n_step_iterator& other): ptr(other.ptr) {}
-public:
-    inline reference operator*() const { return *ptr; }
-    inline pointer operator->() const { return ptr; }
-public:
-    n_step_iterator& operator++() { ptr += n; return *this; }
-    n_step_iterator& operator--() { ptr -= n; return *this; }
-public:
-    n_step_iterator operator++(int) { n_step_iterator old = *this; ptr += n; return old; }
-    n_step_iterator operator--(int) { n_step_iterator old = *this; ptr -= n; return old; }
-public:
-    n_step_iterator& operator+(difference_type d) { ptr += n * d; return *this; }
-    n_step_iterator& operator-(difference_type d) { ptr -= n * d; return *this; }
-    friend inline n_step_iterator& operator+(difference_type d, const n_step_iterator& it) {return n_step_iterator(n * d + it.ptr);}
-    friend inline n_step_iterator& operator-(difference_type d, const n_step_iterator& it) {return n_step_iterator(n * d - it.ptr);}
-public:
-    inline reference operator[](difference_type d) const { return ptr[d]; }
-    inline difference_type operator-(const n_step_iterator& other) { return (ptr - other.ptr) / n; }
-public:
-    inline friend auto operator<=>(const n_step_iterator& a, const n_step_iterator& b) { return a.ptr <=> b.ptr; }
-    inline friend bool operator==(const n_step_iterator& a, const n_step_iterator& b) { return a.ptr == b.ptr; }
-    inline friend bool operator!=(const n_step_iterator& a, const n_step_iterator& b) { return a.ptr != b.ptr; }
-};
-
-template<typename T, typename... Skip>
-constexpr T take_first(T val, Skip...){
-    return val;
-}
-template<typename T, typename Arg, size_t... Idxs>
-constexpr T subs(Arg arg, std::index_sequence<Idxs...>){
-    return T(take_first(arg, Idxs)...);
-}
-template<std::size_t n, typename T, typename Arg>
-constexpr T subs_n_times(Arg arg) {
-    return subs<T, Arg>(arg, std::make_index_sequence<n>{});
-}
 
 template<typename T>
 [[nodiscard]] inline T radians(T&& degrees) requires std::is_arithmetic_v<T> {
@@ -80,27 +22,29 @@ private:
 public:
     vec() = default;
 
-    template<typename T_, typename... U>
-    constexpr vec(T_&& a, U&&... b)
-    requires (1 + sizeof...(U) == n) && is_all_convertible<T, T_, U...>
-        : components {std::forward<T>(a), std::forward<T>(b)...} {}
+    template<is_all_convertible<T>... U>
+    constexpr vec(U&&... a)
+    requires (sizeof...(U) == n)
+        : components {std::forward<T>(a)...} {}
 
-    template<typename T_>
-    vec(const T_(&init)[n]) { // TODO: Delete or unpack
-        std::move(std::execution::par_unseq, init, init + n, components);
+    template<is_all_convertible<T> U>
+    vec(const U(&init)[n]) {
+        unpack<n>(init, components);
     }
 
     template <std::size_t m>
     explicit vec(const vec<T, m>& v) requires (n <= m) {
-        std::copy_n(std::execution::par_unseq, reinterpret_cast<const T*>(&v), n, components);
+        unpack<n>(v, components);
     }
-
-    template <std::size_t m, typename T_, typename... U>
-    vec(const vec<T, m>& v, T_&& a, U&&... b)
-    requires  (n > m) && (1 + sizeof...(U) == n - m) && is_all_convertible<T, T_, U...>
-        : components {std::forward<T>(a), std::forward<T>(b)...}  {
-        std::move(std::execution::par_unseq, components, components + n - m, components + m);
-        std::copy_n(std::execution::par_unseq, reinterpret_cast<const T*>(&v), m, components);
+private:
+    template <size_t... Idxs, is_all_convertible<T>... U>
+    vec(std::index_sequence<Idxs...>, U&&... a): components {Idxs..., std::forward<T>(a)...} {}
+public:
+    template <std::size_t m, is_all_convertible<T>... U>
+    vec(const vec<T, m>& v, U&&... a)
+    requires  (n > m) && (sizeof...(U) == n - m)
+    : vec(std::make_index_sequence<m>{}, std::forward<T>(a)...) {
+        unpack<m>(v, components);
     }
 
     constexpr vec(T value): vec(subs_n_times<n, vec, T>(value)) {}
@@ -141,7 +85,7 @@ public:
         return std::transform_reduce(
             std::execution::par_unseq,
             components, components + n, T(0),
-            std::plus{}, [](const T& a) { return a * a; }
+            std::plus{}, [](auto&& a) { return a * a; }
         );
     }
 
@@ -225,7 +169,7 @@ public:
         std::transform(
             std::execution::par_unseq,
             components, components + n,
-            result.components, [&lam](const T& a) { return a * lam; }
+            result.components, [&lam](auto&& a) { return a * lam; }
         );
         return result;
     };
@@ -236,7 +180,7 @@ public:
         std::transform(
             std::execution::par_unseq,
             components, components + n,
-            result.components, [&lam](const T& a) { return a / lam; }
+            result.components, [&lam](auto&& a) { return a / lam; }
         );
         return result;
     };
@@ -275,7 +219,10 @@ public:
 
     friend std::ostream& operator << (std::ostream& out, const vec<T, n>& v) {
         out << "vec" << n << "{ ";
-        std::copy_n(std::execution::par_unseq, v.components, n, std::ostream_iterator<T>(out, ", "));
+        std::copy_n(
+            std::execution::par_unseq, v.components,
+            n, std::ostream_iterator<T>(out, ", ")
+        );
         out << "\b\b }";
         return out;
     }
@@ -309,10 +256,10 @@ private:
 public:
     constexpr mat() = default;
 
-    template<typename... U>
+    template<is_all_convertible<T>... U>
     constexpr mat(const T(&a)[m], const U(&...b)[m])
-    requires (1 + sizeof...(U) == n) && is_all_convertible<T, U...>
-    : rows {vec<T, m>(a), vec<T, m>(b)...} {}
+    requires (1 + sizeof...(U) == n)
+    : rows {row_t(a), row_t(b)...} {}
 
     mat(const vec<T, std::min(n, m)>& diag) {
         std::copy_n(
@@ -340,8 +287,17 @@ public:
 
     template <std::size_t n_, std::size_t m_>
     mat(const mat<T, n_, m_>& other) requires (n <= n_) && (m <= m_) {
-        for (std::size_t i = 0; i < n; ++i)
-            std::copy_n(reinterpret_cast<T*>(&other) + i * m_, m, reinterpret_cast<T*>(rows) + i * m);
+        std::for_each_n(
+            std::execution::par_unseq,
+            parallel_iterator(rows, reinterpret_cast<const std::remove_cvref_t<decltype(other)>::row_t*>(&other)), n,
+            [&other](auto&& row) {
+                std::copy_n(
+                    std::execution::par_unseq,
+                    reinterpret_cast<const T*>(&std::get<1>(row)),
+                    m, reinterpret_cast<T*>(&std::get<0>(row))
+                );
+            }
+        );
     }
 
     [[nodiscard]] constexpr static inline mat<T, n, m> null() noexcept { return {}; }
@@ -356,12 +312,11 @@ public:
         return rows + n;
     }
 
-    inline vec<T, m>& operator [] (int i) const {
-        return const_cast<vec<T, m>&>(rows[i]);
+    inline row_t& operator [] (int i) const {
+        return const_cast<row_t&>(rows[i]);
     }
 
     [[nodiscard]] inline vec<T, n> col (int j) const {
-        assert(0 <= j && j < m);
         vec<T, n> result;
         std::copy_n(
             std::execution::par_unseq,
@@ -374,16 +329,16 @@ public:
     template<std::size_t l>
     [[nodiscard]] mat<T, n, l> matmul (const mat<T, m, l>& other) const {
         mat<T, n, l> result;
-        vec<T, m>* cols = other.transpose().rows;
+        auto* cols = other.transpose().rows;
         std::transform(
             std::execution::par_unseq, rows, rows + n,
             result.rows,
-            [&cols](const vec<T, m>& row) {
+            [&cols](auto&& row) {
                 vec<T, l> temp;
                 std::transform(
                     std::execution::par_unseq, cols, cols + l,
                     reinterpret_cast<T*>(&temp),
-                    [&row](const vec<T, m>& col) { return row.dot(col); }
+                    [&row](auto&& col) { return row.dot(col); }
                 );
                 return temp;
             }
@@ -391,43 +346,54 @@ public:
         return result;
     };
 
-    [[nodiscard]] inline vec<T, n> matmul(const vec<T, m>& v) const noexcept {
+    [[nodiscard]] inline vec<T, n> matmul(const row_t& v) const noexcept {
         vec<T, n> result;
         std::transform(
             std::execution::par_unseq, rows, rows + n,
             reinterpret_cast<T*>(&result),
-            [&v](const vec<T, m>& row) { return row.dot(v); }
+            [&v](auto&& row) { return row.dot(v); }
         );
         return result;
     }
 
     [[nodiscard]] inline mat<T, m, n> transpose() const {
         mat<T, m, n> result;
-        for (std::size_t j = 0; j < m; ++j)
+        std::for_each_n(
+            std::execution::par_unseq,
+            enum_iterator(&result.rows[0]), n, [this](auto&& row) {
             std::copy_n(
                 std::execution::par_unseq,
-                col_iterator(const_cast<T*>(reinterpret_cast<const T*>(rows)) + j),
-                n, reinterpret_cast<T*>(&result.rows[j])
+                col_iterator(const_cast<T*>(reinterpret_cast<const T*>(rows)) + std::get<1>(row)),
+                n, reinterpret_cast<T*>(&std::get<0>(row))
             );
+        });
+        return result;
+    }
+
+    [[nodiscard]] inline mat<T, n - 1, m - 1> submatrix(int i_, int j_) const {
+        mat<T, n - 1, m - 1> result;
+        std::for_each_n(
+            std::execution::par_unseq,
+            enum_iterator(rows), n,
+            [i_, j_, &result](auto&& row) {
+                const auto index = std::get<1>(row);
+                if (index != i_) {
+                    auto data = std::get<0>(row);
+                    std::copy_if(
+                        std::execution::par_unseq,
+                        enum_iterator(data.begin()),
+                        enum_iterator(data.end()),
+                        enum_iterator(reinterpret_cast<T*>(&result) + (index < i_ ? index : index - 1) * (m - 1)),
+                        [j_](auto&& val) { return std::get<1>(val) != j_; }
+                    );
+                }
+            }
+        );
         return result;
     }
 
     [[nodiscard]] inline T minor(int i_, int j_) const requires (n == m) {
-        mat<T, n - 1, m - 1> submatrix;
-        int _i(0);
-        for (std::size_t i = 0; i < n; ++i) {
-            int _j(0);
-            if (i == i_)
-                continue;
-            for (std::size_t j = 0; j < m; ++j) {
-                if (j == j_)
-                    continue;
-                submatrix[_i][_j] = rows[i][j];
-                ++_j;
-            }
-            ++_i;
-        }
-        return submatrix.det();
+        return submatrix(i_, j_).det();
     }
 
     [[nodiscard]] inline T det() const noexcept requires (n == 2) && (n == m) {
@@ -446,17 +412,38 @@ public:
     }
 
     [[nodiscard]] inline T det() const requires (n == m) && (n > 3) {
-        float result(0.0f);
-        for (int j = 0; j < m; ++j)
-            result += rows[0][j] * (1 - 2 * (j % 2)) * minor(0, j);
-        return result;
+        return std::transform_reduce(
+            std::execution::par_unseq,
+            enum_iterator(rows[0].begin()),
+            enum_iterator(rows[0].end()),
+            T(0), std::plus{}, [this](auto&& a) {
+                const auto j = std::get<1>(a);
+                return std::get<0>(a) * (1 - 2 * (j % 2)) * minor(0, j);
+            }
+        );
     }
 
     [[nodiscard]] mat<T, n, n> inverse() const requires (n == m) {
         mat<T, n, n> adj;
-        for (int i = 0; i < n; ++i)
-            for (int j = 0; j < m; ++j)
-                adj[j][i] = (1 - 2 * ((i + j) % 2)) * minor(i, j);
+        std::transform(
+            std::execution::par_unseq,
+            enum_iterator(adj.rows),
+            enum_iterator(adj.rows + n),
+            adj.rows, [this](auto&& row) {
+                auto data = std::get<0>(row);
+                std::transform(
+                    std::execution::par_unseq,
+                    enum_iterator(data.begin()),
+                    enum_iterator(data.end()),
+                    data.begin(),
+                    [j = std::get<1>(row), this](auto&& val) {
+                        const auto i = std::get<1>(val);
+                        return (1 - 2 * ((i + j) % 2)) * minor(i, j);
+                    }
+                );
+                return data;
+            }
+        );
         return adj / this->det();
     }
 
@@ -507,7 +494,6 @@ public:
         };
     }
 
-    template<typename ...U>
     [[nodiscard]] constexpr static inline mat<T, 4, 4> scale(const vec<T, 3>& s) noexcept requires (n == 4) && (n == m) {
         return {
             {s.x(), T(0), T(0), T(0)},
@@ -624,7 +610,7 @@ public:
         std::transform(
             std::execution::par_unseq,
             rows, rows + n,
-            result.rows, [&lam](const vec<T, m>& row) { return row * lam; }
+            result.rows, [&lam](auto&& row) { return row * lam; }
         );
         return result;
     };
@@ -635,7 +621,7 @@ public:
         std::transform(
             std::execution::par_unseq,
             rows, rows + n,
-            result.rows, [&lam](const vec<T, m>& row) { return row / lam; }
+            result.rows, [&lam](auto&& row) { return row / lam; }
         );
         return result;
     };
@@ -674,11 +660,18 @@ public:
 
     friend std::ostream& operator << (std::ostream& out, const mat<T, n, m>& matrix) {
         out << "mat" << n << "x" << m << "{\n";
-        for (const vec<T, m>& row : matrix.rows) {
-            out << "    { ";
-            std::copy_n(reinterpret_cast<const T*>(&row), m, std::ostream_iterator<T>(out, ", "));
-            out << "\b\b },\n";
-        }
+        std::for_each_n(
+            std::execution::par_unseq,
+            matrix.rows, n, [&out](auto&& row) {
+                out << "    { ";
+                std::copy_n(
+                    std::execution::par_unseq,
+                    reinterpret_cast<const T*>(&row), m,
+                    std::ostream_iterator<T>(out, ", ")
+                );
+                out << "\b\b },\n";
+            }
+        );
         out << "\b\b}";
         return out;
     }
